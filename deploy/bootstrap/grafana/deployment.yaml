@@ -41,6 +41,17 @@ spec:
       labels:
         app: grafana
     spec:
+      # fix hostPath volume ownership - grafana image runs as uid 472
+      # but kubelet creates /grafana as root on whichever node the pod lands
+      initContainers:
+        - name: fix-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chown -R 472:472 /var/lib/grafana || true"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: grafana-storage
+              mountPath: /var/lib/grafana
       containers:
       - name: grafana
         image: grafana/grafana:8.1.1
@@ -109,8 +120,7 @@ metadata:
 spec:
   selector:
     app: grafana
-  type: NodePort
+  type: ClusterIP
   ports:
     - port: 3000
       targetPort: 3000
-      nodePort: 32000

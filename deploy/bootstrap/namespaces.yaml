@@ -22,4 +22,13 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
+  name: dev
+  labels:
+    name: dev
+
+---
+
+apiVersion: v1
+kind: Namespace
+metadata:
   name: imdb

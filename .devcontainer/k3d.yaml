@@ -1,6 +1,11 @@
 apiVersion: k3d.io/v1alpha2
 kind: Simple
+# pinned k3s version - matches kubectl v1.28.3 pinned in install-tools.sh
+# (k3d v4.4.8 default image is k3s v1.21.3 which bundles Traefik 2.4.8 that
+#  does NOT support spec.ingressClassName field -> ingress returns 404)
+image: rancher/k3s:v1.28.3-k3s1
 servers: 1
+agents: 1
 network: k3d
 kubeAPI:
   hostIP: "0.0.0.0"
@@ -13,18 +18,18 @@ volumes:
     nodeFilters:
       - server[0]
 ports:
-  - port: 30000:30000
+  # Traefik Ingress gateway - all apps are routed via Host rules
+  - port: 8080:80
     nodeFilters:
-      - server[0]
-  - port: 30080:30080
+      - loadbalancer
+  # PostgreSQL (via LoadBalancer service)
+  - port: 5432:5432
     nodeFilters:
-      - server[0]
-  - port: 31080:31080
+      - loadbalancer
+  # Redis (via LoadBalancer service)
+  - port: 6379:6379
     nodeFilters:
-      - server[0]
-  - port: 32000:32000
-    nodeFilters:
-      - server[0]
+      - loadbalancer
 
 options:
   k3d:

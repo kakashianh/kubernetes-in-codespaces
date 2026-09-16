@@ -15,6 +15,17 @@ spec:
       labels:
         app: prometheus-server
     spec:
+      # fix hostPath volume ownership - prometheus image runs as uid 65534
+      # but kubelet creates /prometheus as root on whichever node the pod lands
+      initContainers:
+        - name: fix-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chown -R 65534:65534 /prometheus || true"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: prometheus-storage-volume
+              mountPath: /prometheus/
       containers:
         - name: prometheus
           image: prom/prometheus:v2.29.1
@@ -22,7 +33,7 @@ spec:
             limits:
               memory: "1024Mi"
               cpu: "1000m"
-            requests: 
+            requests:
               memory: "1024Mi"
               cpu: "1000m"
           args:
@@ -40,7 +51,7 @@ spec:
           configMap:
             defaultMode: 420
             name: prometheus-server-conf
-  
+
         - name: prometheus-storage-volume
           hostPath:
             path: /prometheus
@@ -55,12 +66,11 @@ metadata:
   annotations:
       prometheus.io/scrape: 'true'
       prometheus.io/port:   '9090'
-  
+
 spec:
-  selector: 
+  selector:
     app: prometheus-server
-  type: NodePort  
+  type: ClusterIP
   ports:
     - port: 8080
-      targetPort: 9090 
-      nodePort: 30000
+      targetPort: 9090

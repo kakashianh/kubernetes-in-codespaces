@@ -1,15 +1,36 @@
-# this image is built and updated weekly
-# https://github.com/cse-labs/codespaces-images
+# Unified develop environment for cloud-based Kubernetes development
+# This image is a toolbox - it does NOT run databases or the cluster itself.
+# The k3d cluster + local registry are created at Codespace creation time.
 
-FROM ghcr.io/cse-labs/k3d:latest
+FROM mcr.microsoft.com/devcontainers/base:ubuntu
 
-# some images require specific values
 ARG USERNAME=vscode
 
-# log the docker build start event
-RUN echo "$(date +'%Y-%m-%d %H:%M:%S')    docker build start" >> /home/$USERNAME/status
+# install basic tools via apt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        wget \
+        jq \
+        unzip \
+        zip \
+        tree \
+        make \
+        vim \
+        nano \
+        netcat-openbsd \
+        ca-certificates \
+        gnupg \
+        lsb-release \
+        httpie \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN chown -R $USERNAME:$USERNAME /home/$USERNAME
+# install the pinned Kubernetes development tools
+COPY scripts/install-tools.sh /tmp/install-tools.sh
 
-# log the docker build complete
-RUN echo "$(date +'%Y-%m-%d %H:%M:%S')    docker build complete" >> /home/$USERNAME/status
+RUN bash /tmp/install-tools.sh \
+    && rm /tmp/install-tools.sh
+
+USER ${USERNAME}
+
+WORKDIR /workspaces

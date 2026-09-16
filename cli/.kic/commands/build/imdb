@@ -32,4 +32,4 @@ kubectl wait pod -l app=webv -n imdb --for condition=ready --timeout=30s
 
 # show status and curl results
 kubectl get pods -n imdb
-http localhost:30080/version
+curl -sS -H 'Host: imdb.localhost' localhost:8080/version

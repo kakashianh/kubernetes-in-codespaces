@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# this runs as part of pre-build
+# this runs as part of pre-build (container image build completes first)
 
 echo "on-create start"
 echo "$(date +'%Y-%m-%d %H:%M:%S')    on-create start" >> "$HOME/status"
@@ -26,40 +26,24 @@ mkdir -p "$HOME/.ssh"
     echo "compinit"
 } >> "$HOME/.zshrc"
 
-# create local registry
-docker network create k3d
-k3d registry create registry.localhost --port 5500
-docker network connect k3d k3d-registry.localhost
-
-# update the base docker images
-docker pull mcr.microsoft.com/dotnet/aspnet:6.0-alpine
-docker pull mcr.microsoft.com/dotnet/sdk:6.0
-docker pull ghcr.io/cse-labs/webv-red:latest
-
-# echo "dowloading kic CLI"
-# cd cli || exit
-# tag="0.4.3"
-# wget -O kic.tar.gz "https://github.com/retaildevcrews/akdc/releases/download/$tag/kic-$tag-linux-amd64.tar.gz"
-# tar -xvzf kic.tar.gz
-# rm kic.tar.gz
-# cd "$OLDPWD" || exit
-
 echo "generating completions"
-kic completion zsh > "$HOME/.oh-my-zsh/completions/_kic"
+kic completion zsh > "$HOME/.oh-my-zsh/completions/_kic" 2>/dev/null || true
 kubectl completion zsh > "$HOME/.oh-my-zsh/completions/_kubectl"
 
 echo "creating k3d cluster"
-kic cluster rebuild
+bash scripts/cluster-up.sh
 
-echo "bilding IMDb"
+# bootstrap first: creates namespaces + ingress + infra (postgres/redis/monitoring/apps)
+# apps applied here may fail to pull local images until 'kic build' pushes them
+echo "deploying k3d cluster"
+bash scripts/bootstrap.sh
+
+echo "building IMDb"
 kic build imdb
 
 echo "building WebValidate"
 sed -i "s/RUN dotnet test//g" /workspaces/webvalidate/Dockerfile
 kic build webv
-
-echo "deploying k3d cluster"
-kic cluster deploy
 
 # only run apt upgrade on pre-build
 if [ "$CODESPACE_NAME" = "null" ]

@@ -1,6 +1,10 @@
 {
 	"name": "Kubernetes-in-Codespaces",
-	"dockerFile": "Dockerfile",
+
+	"build": {
+		"dockerfile": "Dockerfile",
+		"context": "."
+	},
 
 	// do not change these if you want Docker in Docker support
 	"runArgs": ["--init", "--privileged"],
@@ -10,54 +14,84 @@
 	// some base images require a specific user name
 	"remoteUser": "vscode",
 
+	"containerEnv": {
+		"DOCKER_HOST": "unix:///var/run/docker-host.sock",
+		"DEV_PROFILE": "full"
+	},
+
+	"features": {
+		"ghcr.io/devcontainers/features/git:1": {},
+		"ghcr.io/devcontainers/features/github-cli:1": {},
+		"ghcr.io/devcontainers/features/dotnet:1": {
+			"version": "6.0"
+		}
+	},
+
 	// Set container specific settings
 	"settings": {
 		"terminal.integrated.defaultProfile.linux": "zsh",
 		"files.trimTrailingWhitespace": true,
 		"files.trimFinalNewlines": true,
-		"files.insertFinalNewline": true
+		"files.insertFinalNewline": true,
+		"editor.formatOnSave": true,
+		"editor.codeActionsOnSave": {
+			"source.fixAll": "explicit"
+		},
+		"yaml.validate": true
 	},
 
 	"hostRequirements": {
 		"cpus": 4
 	},
 
-	// forward ports for the app
+	// forward ports for the apps (via Traefik Ingress) and data services
 	"forwardPorts": [
-		30000,
-		30080,
-		31080,
-		32000
+		8080,
+		5432,
+		6379,
+		9090,
+		3001
 	],
 
 	// add labels
 	"portsAttributes": {
-		"30000": { "label": "Prometheus" },
-		"30080": { "label": "IMDb App" },
-		"31080": { "label": "Heartbeat" },
-		"32000": { "label": "Grafana" }
+		"8080": { "label": "Traefik Ingress", "onAutoForward": "notify" },
+		"5432": { "label": "PostgreSQL", "onAutoForward": "silent" },
+		"6379": { "label": "Redis", "onAutoForward": "silent" },
+		"9090": { "label": "Prometheus", "onAutoForward": "silent" },
+		"3001": { "label": "Grafana", "onAutoForward": "notify" }
 	},
 
 	// Install extensions
-	"extensions": [
-		"ms-dotnettools.csharp",
-		"ms-azuretools.vscode-docker",
-		"ms-kubernetes-tools.vscode-kubernetes-tools",
-		"davidanson.vscode-markdownlint",
-		"gruntfuggly.todo-tree",
-		"mutantdino.resourcemonitor",
-		"humao.rest-client",
-		"timonwong.shellcheck",
-	],
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-kubernetes-tools.vscode-kubernetes-tools",
+				"redhat.vscode-yaml",
+				"ms-azuretools.vscode-docker",
+				"ms-dotnettools.csharp",
+				"eamodio.gitlens",
+				"GitHub.copilot",
+				"GitHub.copilot-chat",
+				"humao.rest-client",
+				"timonwong.shellcheck",
+				"davidanson.vscode-markdownlint",
+				"gruntfuggly.todo-tree",
+				"mutantdino.resourcemonitor",
+				"ms-vscode.makefile-tools",
+				"editorconfig.editorconfig"
+			]
+		}
+	},
 
 	"waitFor": "postCreateCommand",
 
 	// Use 'onCreateCommand' to run commands as part of container creation.
-	"onCreateCommand": "/bin/bash -c .devcontainer/on-create.sh",
+	"onCreateCommand": "/bin/bash -c .devcontainer/scripts/on-create.sh",
 
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "/bin/bash -c .devcontainer/post-create.sh",
+	"postCreateCommand": "/bin/bash -c .devcontainer/scripts/post-create.sh",
 
 	// Use 'postStartCommand' to run commands after the container starts.
-	"postStartCommand": "/bin/bash -c .devcontainer/post-start.sh"
+	"postStartCommand": "/bin/bash -c .devcontainer/scripts/post-start.sh"
 }

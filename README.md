@@ -6,7 +6,7 @@
 
 ## Overview
 
-This is a template that will setup a Kubernetes developer cluster using `k3d` in a `GitHub Codespace`
+This is a template that will setup a Kubernetes developer cluster using `k3d` in a `GitHub Codespace`.
 
 We use this for `inner-loop` Kubernetes development. Note that it is not appropriate for production use but is a great `Developer Experience`. Feedback calls the approach `game-changing` - we hope you agree!
 
@@ -18,48 +18,34 @@ You can connect to the Codespace with a local version of VS Code.
 
 Please experiment and add any issues to the GitHub Discussion.
 
-The motivation for creating and using Codespaces is highlighted by this [GitHub Blog Post](https://github.blog/2021-08-11-githubs-engineering-team-moved-codespaces/). "It eliminated the fragility and single-track model of local development environments, but it also gave us a powerful new point of leverage for improving GitHub’s developer experience."
+## Stack
 
-Cory Wilkerson, Senior Director of Engineering at GitHub, recorded a podcast where he shared the GitHub journey to [Codespaces](https://changelog.com/podcast/459)
+The development environment is fully self-contained and reproducible:
 
-## Join the CSE-Labs GitHub Org
+- **k3d cluster** (`dev`) with `k3s v1.28.3` - the k3s version is pinned to stay in sync with the kubectl client and to get a Traefik version that supports the `IngressClassName` API
+- **Local container registry** (`registry.localhost:5500`) - load images into the cluster with `kic build`
+- **Traefik Ingress** - all apps are exposed via host-based routing on `*.localhost:8080` (no NodePorts)
+- **PostgreSQL 17** - StatefulSet with a 10Gi PVC (`dev` namespace)
+- **Redis 7** - Deployment with `maxmemory 128mb allkeys-lru` (`dev` namespace)
+- **Prometheus + Grafana** with two pre-provisioned dashboards (IMDb, Dotnet)
+- **Fluent Bit** (stdout) for logs
+- **hazy/fluentd-style "webv" workloads** (`imdb` + `heartbeat` namespaces) that generate load so you can see live metrics
 
-> You must be a member of the Microsoft OSS and CSE-Labs GitHub organizations
+### Profiles
 
-- If you can't open a Codespace in this repo, you need to join the GitHub org(s)
-  - Instructions for joining are [here](https://github.com/cse-labs/moss)
-- Return to this repo after joining the org(s)
+The bootstrap is profile-driven. `DEV_PROFILE` selects how much of the stack gets installed:
 
-## Open with Codespaces
+| Profile | Agents | Namespaces + Ingress | PostgreSQL + Redis | Monitoring + Logging + Apps |
+|---------|:------:|:--------------------:|:------------------:|:---------------------------:|
+| `minimal` | 1 | ✅ | | |
+| `backend` | 2 | ✅ | ✅ | |
+| `full` | 2 | ✅ | ✅ | ✅ |
 
-> You must be a member of the Microsoft OSS and CSE-Labs GitHub organizations
+- The agent count (size of the cluster: 1 vs 2 server agents) is chosen in `.devcontainer/k3d.yaml` when the cluster is created.
+- The bootstrap (`scripts/bootstrap.sh`) is **additive**: it only ever applies manifests for the selected profile and never deletes resources. Running it again is always safe.
+- Default profile is `full`.
 
-- Click the `Code` button on this repo
-- Click the `Codespaces` tab
-- Click `New Codespace`
-- Choose the `4 core` option
-
-![Create Codespace](./images/OpenWithCodespaces.jpg)
-
-## Stopping a Codespace
-
-- Codespaces will shutdown automatically after being idle for 30 minutes
-- To shutdown a codespace immediately
-  - Click `Codespaces` in the lower left of the browser window
-  - Choose `Stop Current Codespace` from the context menu
-
-- You can also rebuild the container that is running your Codespace
-  - Any changes in `/workspaces` will be retained
-  - Other directories will be reset
-  - Click `Codespaces` in the lower left of the browser window
-  - Choose `Rebuild Container` from the context menu
-  - Confirm your choice
-
-- To delete a Codespace
-  - <https://github.com/codespaces>
-  - Use the context menu to delete the Codespace
-  - Please delete your Codespace once you complete the lab
-    - Creating a new Codespace only takes about 45 seconds!
+Set the profile by changing `DEV_PROFILE` in `.devcontainer/devcontainer.json` (or pass it inline when running `bash scripts/bootstrap.sh`).
 
 ## Checking the k3d Cluster
 
@@ -104,12 +90,33 @@ Cory Wilkerson, Senior Director of Engineering at GitHub, recorded a podcast whe
 
 ```bash
 
-# check endpoints
-kic check all
+# check all endpoints (via the Traefik Ingress) - returns 0 only if everything is healthy
+make check
+
+# check the pods + services
+make status
 
 ```
 
 ### Validating endpoints
+
+All apps are reachable through the **Traefik Ingress** on port `8080` using `Host`-based routing:
+
+| Host | App | Notes |
+|------|-----|-------|
+| `imdb.localhost` | IMDb-app | Swagger + movie API |
+| `heartbeat.localhost` | Heartbeat | logs every 5s |
+| `grafana.localhost` | Grafana | `admin` / `cse-labs` |
+| `prometheus.localhost` | Prometheus | UI |
+
+```bash
+
+# e.g. curl the imdb service through the ingress
+curl -i -H 'Host: imdb.localhost' localhost:8080/version
+
+```
+
+The routing rules live in [`deploy/ingress.yaml`](./deploy/ingress.yaml).
 
 Open [curl.http](./curl.http)
 
@@ -122,6 +129,39 @@ Open [curl.http](./curl.http)
 Clicking on `Send Request` should open a new panel in Visual Studio Code with the response from that request like so:
 
 ![REST Client example response](./images/RESTClientResponse.png)
+
+> **Codespaces note:** port forwarding in the Codespaces browser forwards to `*.app.github.dev`, not `localhost`, so `Host`-based routing works best from the terminal (curl/httpie). If you need to open an app in the browser widget, the label of each forwarded port is still configured in `.devcontainer/devcontainer.json` (`8080` Ingress, `5432` Postgres, `6379` Redis, `9090`, ...).
+
+## Data Services
+
+PostgreSQL and Redis run in the `dev` namespace and are exposed on the cluster's load balancer so the host can reach them on regular ports:
+
+```bash
+
+# PostgreSQL - host reachable on localhost:5432
+PGPASSWORD=dev psql -h localhost -p 5432 -U dev -d app -c 'select version();'
+
+# Redis - host reachable on localhost:6379
+redis-cli -h localhost -p 6379 ping   # => PONG
+
+```
+
+| Service | Namespace | Host port | Credentials |
+|---------|:---------:|-----------|-------------|
+| `postgres` (StatefulSet) | `dev` | 5432 | `dev` / `dev` / db `app` |
+| `redis` (Deployment) | `dev` | 6379 | — |
+
+## Persistence Strategy
+
+Three tiers of persistence, chosen by what makes sense for a dev environment:
+
+1. **Node volumes** (`hostPath`, survive pod restarts but not `make reset` unless re-created):
+   - Prometheus data, Grafana data - mounted on the nodes (`/prometheus`, `/grafana`) and `chown`-ed via init containers + `cluster-up.sh` so pods on any node can write.
+2. **Kubernetes PVC** (survives cluster rebuilds because k3d mounts the volumes into the container):
+   - PostgreSQL 10Gi PVC (`volumeClaimTemplates` in the StatefulSet).
+3. **Ephemeral** - everything else:
+   - Redis (in-memory, `maxmemory 128mb allkeys-lru` - fine for dev).
+   - Local registry images.
 
 ## Jump Box
 
@@ -143,53 +183,52 @@ A `jump box` pod is created so that you can execute commands `in the cluster`
 - Since the jumpbox is running `in` the cluster, we use the service name and port, not the NodePort
   - A jumpbox is great for debugging network issues
 
-## NodePorts
+## Ports & Forwarding
 
 - Codespaces exposes `ports` to the local browser
-- We take advantage of this by exposing `NodePort` on most of our K8s services
+- The cluster exposes everything through the **Traefik Ingress on `8080`**, and Postgres/Redis via the service `LoadBalancer` ports
 - Codespaces ports are setup in the `.devcontainer/devcontainer.json` file
-
-- Exposing the ports
 
   ```json
 
-  // forward ports for the app
+  // forward ports for the app (Ingress + data services)
   "forwardPorts": [
-    30000,
-    30080,
-    31080,
-    32000
+    8080,
+    5432,
+    6379,
+    9090,
+    3001
   ],
 
   ```
-
-- Adding labels to the ports
 
   ```json
 
   // add labels
   "portsAttributes": {
-    "30000": { "label": "Prometheus" },
-    "30080": { "label": "IMDb-app" },
-    "31080": { "label": "Heartbeat" },
-    "32000": { "label": "Grafana" },
+    "8080": { "label": "Traefik Ingress" },
+    "5432": { "label": "PostgreSQL" },
+    "6379": { "label": "Redis" },
+    "9090": { "label": "Prometheus" },
+    "3001": { "label": "Grafana" }
   },
 
   ```
 
+> NodePorts are no longer used - see the ingress section below.
+
 ## View IMDB App
 
-- Click on the `ports` tab of the terminal window
-- Click on the `open in browser icon` on the IMDb-App port (30080)
-- This will open the imdb-app home page (Swagger) in a new browser tab
+- Open the ingress port (`8080`) with the `Host` header set:
+  - `curl http://imdb.localhost:8080/` from a terminal, or
+  - `curl -i -H 'Host: imdb.localhost' localhost:8080/`
+- This will show the imdb-app home page (Swagger)
 
 ## View Heartbeat
 
-- Click on the `ports` tab of the terminal window
-- Click on the `open in browser icon` on the Heartbeat port (31080)
-- This will open the heartbeat home page (Swagger) in a new browser tab
-  - Note that you will see page `Under construction ...` as heartbeat does not have a UI
-  - Add `version` or `/heartbeat/17` to the end of the URL in the browser tab
+- `curl http://heartbeat.localhost:8080/heartbeat/17`
+  - Or with a Host header: `curl -i -H 'Host: heartbeat.localhost' localhost:8080/heartbeat/17`
+- Heartbeat does not have a UI - the page says `Under construction ...` but the JSON endpoint works.
 
 ## Build and deploy a local version of imdb-app
 
@@ -210,7 +249,7 @@ A `jump box` pod is created so that you can execute commands `in the cluster`
 
   # check the app version
   # the semver will have the current date and time
-  http localhost:30080/version
+  curl -i -H 'Host: imdb.localhost' localhost:8080/version
 
   ```
 
@@ -266,9 +305,8 @@ A `jump box` pod is created so that you can execute commands `in the cluster`
 
 ## View Prometheus Dashboard
 
-- Click on the `ports` tab of the terminal window
-- Click on the `open in browser icon` on the Prometheus port (30000)
-- This will open Prometheus in a new browser tab
+- `curl -i -H 'Host: prometheus.localhost' localhost:8080/-/ready`
+- Or open the browser: `http://prometheus.localhost:8080`
 
 - From the Prometheus tab
   - Begin typing `ImdbAppDuration_bucket` in the `Expression` search
@@ -281,9 +319,8 @@ A `jump box` pod is created so that you can execute commands `in the cluster`
   - admin
   - cse-labs
 
-- Click on the `ports` tab of the terminal window
-  - Click on the `open in browser icon` on the Grafana port (32000)
-  - This will open Grafana in a new browser tab
+- `curl -i -H 'Host: grafana.localhost' localhost:8080/login`
+- Or open the browser: `http://grafana.localhost:8080`
 
 ![Codespace Ports](./images/CodespacePorts.jpg)
 
@@ -335,20 +372,73 @@ Developers can simply click on a button in GitHub to open a Codespace for the re
 - Clone the repository in the development container
 - Connect to the remotely hosted development container via the browser or Visual Studio Code
 
+### Repository layout
+
+```text
+
+.
+├── .devcontainer/                 # devcontainer definition + lifecycle scripts
+│   ├── Dockerfile
+│   ├── devcontainer.json
+│   ├── k3d.yaml                   # cluster config (agents, ports, k3s image pin)
+│   └── scripts/
+│       ├── install-tools.sh       # pinned tool versions (kubectl, helm, k3d, ...)
+│       ├── on-create.sh           # runs once when the container is created
+│       ├── post-start.sh          # runs every time the container starts
+│       └── ...
+├── scripts/
+│   ├── cluster-up.sh              # create the k3d cluster (idempotent)
+│   ├── cluster-down.sh
+│   ├── bootstrap.sh               # profile-driven manifest bootstrap (additive)
+│   └── dev-reset.sh               # cluster down + up + bootstrap
+├── deploy/
+│   ├── ingress.yaml               # Traefik host routing (imdb/heartbeat/grafana/prometheus.localhost)
+│   ├── postgres.yaml              # PostgreSQL StatefulSet + LoadBalancer service
+│   ├── redis.yaml                 # Redis Deployment + LoadBalancer service
+│   ├── apps/                      # imdb, webv lab apps
+│   └── bootstrap/                 # prometheus, grafana, fluentbit, heartbeat, webv-heartbeat, namespaces
+├── cli/
+│   ├── kic                        # the kic CLI (compiled)
+│   └── .kic/commands/             # bash sub-commands (build, check, ...)
+├── curl.http                      # REST Client requests
+├── Makefile                       # make up / down / status / check / logs / ...
+└── context/de-xuat-hoan-thien/    # hoàn-thiện proposal + plan (Tiếng Việt)
+
+```
+
 `.devcontainer` folder contains the following:
 
 - `devcontainer.json`: This configuration file determines the environment for new Codespaces created for the repository by defining a development container that can include frameworks, tools, extensions, and port forwarding. For more information about the settings and properties that you can set in a devcontainer.json, see [devcontainer.json reference](https://code.visualstudio.com/docs/remote/devcontainerjson-reference) in the Visual Studio Code documentation.
 
 - `Dockerfile`: Dockerfile in `.devcontainer` defines a container image and installs software. You can use an existing base image by using the `FROM` instruction. For more information on using a Dockerfile in a dev container, see [Create a development container](https://code.visualstudio.com/docs/remote/create-dev-container#_dockerfile) in the Visual Studio Code documentation.
 
-- `Bash scripts`: We store lifecycle scripts under the `.devcontainer` folder. They are the hooks that allow you to run commands at different points in the development container lifecycle which include:
+- `scripts/`: We keep the lifecycle scripts under `.devcontainer/scripts`. They are the hooks that allow you to run commands at different points in the development container lifecycle which include:
   - onCreateCommand - Run when creating the container
   - postCreateCommand - Run after the container is created
   - postStartCommand - Run every time the container starts
 
   For more information on using Lifecycle scripts, see [Codespaces lifecycle scripts](https://code.visualstudio.com/docs/remote/devcontainerjson-reference#_lifecycle-scripts).
 
-  > Note: Provide executable permissions to scripts using: `chmod+ x`.
+  > Note: Provide executable permissions to scripts using: `chmod +x`.
+
+## Makefile
+
+A `Makefile` wraps the common workflows:
+
+```bash
+
+make up        # create cluster (idempotent)
+make down      # delete cluster
+make reset     # cluster down + up + bootstrap (full reset)
+make status    # kic pods + kic svc
+make check     # verify all endpoints via ingress (curl + Host header)
+make logs      # follow imdb + heartbeat logs
+make db        # PGPASSWORD=dev psql -h localhost -p 5432 -U dev -d app
+make redis     # redis-cli -h localhost -p 6379
+make k9s       # open k9s
+make help      # list all targets
+
+```
 
 ## Next Steps
 
@@ -358,12 +448,16 @@ Developers can simply click on a button in GitHub to open a Codespace for the re
 - K9s
 - kubectl
 - Docker
+- helm
 
 If you break your cluster, just rebuild it using
 
 ```bash
 
-kic cluster rebuild
+make reset
+
+# or manually:
+# bash scripts/cluster-down.sh && bash scripts/cluster-up.sh && bash scripts/bootstrap.sh
 
 ```
 
@@ -385,6 +479,12 @@ kic cluster rebuild
     - Rancher provides support - including 24x7 (for a fee)
     - K3s has a vibrant community
     - K3s is a CNCF sandbox project
+- Why does `k3d.yaml` pin `rancher/k3s:v1.28.3-k3s1`?
+  - k3d v4.4.8's default image is k3s v1.21.3 (2021), whose bundled Traefik (2.4.x) does not support `spec.ingressClassName` - which made every Ingress return 404. Pinning k3s v1.28.3 keeps the server version aligned with the kubectl client and fixes Ingress.
+- Why Ingress + `*.localhost` instead of NodePorts?
+  - One gateway port (`8080`) instead of many random high ports (30000-32000). Host-based routing (`imdb.localhost`, `grafana.localhost`, ...) is closer to how production exposes services.
+- Why is the registry name still `registry.localhost:5500`?
+  - The `kic build` scripts reference the registry by that name (`k3d-registry.localhost:5500`); renaming it would break image loads into the cluster.
 
 ### Engineering Docs
 

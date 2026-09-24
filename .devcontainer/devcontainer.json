@@ -70,13 +70,11 @@
 				"redhat.vscode-yaml",
 				"ms-azuretools.vscode-docker",
 				"ms-dotnettools.csharp",
-				"eamodio.gitlens",
 				"GitHub.copilot",
 				"GitHub.copilot-chat",
 				"humao.rest-client",
 				"timonwong.shellcheck",
 				"davidanson.vscode-markdownlint",
-				"gruntfuggly.todo-tree",
 				"mutantdino.resourcemonitor",
 				"ms-vscode.makefile-tools",
 				"editorconfig.editorconfig"

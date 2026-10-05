@@ -50,7 +50,11 @@
 		5432,
 		6379,
 		9090,
-		3001
+		3001,
+		8082,
+		8083,
+		8084,
+		8085
 	],
 
 	// add labels
@@ -59,7 +63,11 @@
 		"5432": { "label": "PostgreSQL", "onAutoForward": "silent" },
 		"6379": { "label": "Redis", "onAutoForward": "silent" },
 		"9090": { "label": "Prometheus", "onAutoForward": "silent" },
-		"3001": { "label": "Grafana", "onAutoForward": "notify" }
+		"3001": { "label": "Grafana", "onAutoForward": "notify" },
+		"8082": { "label": "IMDB API", "onAutoForward": "silent" },
+		"8083": { "label": "WebV (IMDB)", "onAutoForward": "silent" },
+		"8084": { "label": "Heartbeat API", "onAutoForward": "silent" },
+		"8085": { "label": "WebV (Heartbeat)", "onAutoForward": "silent" }
 	},
 
 	// Install extensions
